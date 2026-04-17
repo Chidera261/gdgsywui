@@ -1,11 +1,11 @@
 #!/bin/bash
-echo "🚀 V4: Initializing Local SSD (Excluding Git/Workflows)..."
+echo "🚀 V4: Fixing PM2 Path & Syncing..."
 
-# 1. Install Rclone & Tools
+# 1. Install Tools
 sudo curl https://rclone.org/install.sh | sudo bash
 sudo apt-get update && sudo apt-get install -y jq micro htop ncdu btop tmate
 
-# 2. Configure rclone
+# 2. Configure Rclone
 mkdir -p ~/.config/rclone
 cat <<EOF > ~/.config/rclone/rclone.conf
 [idrive]
@@ -17,26 +17,27 @@ endpoint = $IDRIVE_ENDPOINT
 region = us-west-2
 EOF
 
-# 3. Initial Pull (Excluding Git and Workflows)
-echo "📥 Pulling latest state from iDrive..."
+# 3. SET PM2 PERMANENT HOME (Inside Workspace)
+# This makes PM2 save EVERYTHING inside your synced folder
+export PM2_HOME="$GITHUB_WORKSPACE/.pm2_eternal"
+mkdir -p "$PM2_HOME"
+
+# 4. Pull from iDrive
+echo "📥 Syncing from iDrive..."
 rclone copy idrive:$BUCKET_NAME $GITHUB_WORKSPACE \
     --exclude ".git/**" \
     --exclude ".github/**" \
     --progress
 
-# 4. Link PM2
-mkdir -p /home/runner/.pm2
-[ -f $GITHUB_WORKSPACE/.pm2_dump ] && cp $GITHUB_WORKSPACE/.pm2_dump /home/runner/.pm2/dump.pm2
-
 # 5. Persistent Shell Config
 if [ ! -f $GITHUB_WORKSPACE/.bashrc_addon ]; then
     cat <<EOF > $GITHUB_WORKSPACE/.bashrc_addon
-export PM2_HOME=/home/runner/.pm2
-alias save='pm2 save --force && cp /home/runner/.pm2/dump.pm2 $GITHUB_WORKSPACE/.pm2_dump'
+# Force PM2 to use the synced workspace folder
+export PM2_HOME="$GITHUB_WORKSPACE/.pm2_eternal"
+alias save='pm2 save --force'
 alias push='rclone sync $GITHUB_WORKSPACE idrive:\$BUCKET_NAME --exclude ".git/**" --exclude ".github/**" --progress'
-alias status='pm2 status'
 EOF
 fi
 
 cat $GITHUB_WORKSPACE/.bashrc_addon >> /home/runner/.bashrc
-echo "✅ Environment Ready."
+echo "✅ PM2 Home set to: $PM2_HOME"
