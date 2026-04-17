@@ -1,4 +1,4 @@
-name: VPS Emulator Eternal V4
+name: VPS Emulator Eternal V4 (Path Fixed)
 
 on:
   workflow_dispatch:
@@ -23,13 +23,17 @@ jobs:
 
       - name: Mount & Provision
         run: |
+          sudo npm install -g pm2
           chmod +x install.sh
           ./install.sh
+          # Refresh path for the current runner session
+          echo "/usr/local/bin" >> $GITHUB_PATH
 
       - name: Restore PM2 State (Path-Aware)
         run: |
-          pm2 ping || pm2 startup
-          sleep 5
+          # Using npx ensures we find the pm2 binary regardless of path caching
+          npx pm2 ping || npx pm2 startup
+          sleep 8
           
           if [ -f $PM2_HOME/dump.pm2 ]; then
             echo "🔄 Correcting paths for current VM..."
@@ -37,13 +41,15 @@ jobs:
               const fs = require('fs');
               const path = process.env.PM2_HOME + '/dump.pm2';
               try {
-                const data = fs.readFileSync(path, 'utf8');
-                const repaired = data.replace(/\/home\/runner\/work\/[^/]+\/[^/]+/g, process.env.GITHUB_WORKSPACE);
-                fs.writeFileSync(path, repaired);
-                console.log('✅ Path repair successful');
+                if (fs.existsSync(path)) {
+                  const data = fs.readFileSync(path, 'utf8');
+                  const repaired = data.replace(/\/home\/runner\/work\/[^/]+\/[^/]+/g, process.env.GITHUB_WORKSPACE);
+                  fs.writeFileSync(path, repaired);
+                  console.log('✅ Path repair successful');
+                }
               } catch (e) { console.error('❌ Path repair failed:', e.message); }
             "
-            pm2 resurrect || echo "⚠️ Resurrection failed."
+            npx pm2 resurrect || echo "⚠️ Resurrection failed."
           fi
 
       - name: Connectivity Info
@@ -60,11 +66,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.MY_PAT }}
         run: |
-          # Wait for 5.5 hours
           sleep 19800
-          
-          # Final save to iDrive
-          pm2 save --force
+          npx pm2 save --force
           
           NEXT_GEN=$(( ${{ github.event.inputs.generation }} + 1 ))
           curl -L -X POST \
@@ -72,6 +75,5 @@ jobs:
             -H "Accept: application/vnd.github.v3+json" \
             https://api.github.com/repos/${{ github.repository }}/actions/workflows/vps-eternal-v4.yaml/dispatches \
             -d "{\"ref\":\"${{ github.ref_name }}\", \"inputs\": {\"generation\": \"$NEXT_GEN\"}}"
-          
           sleep 600
           
