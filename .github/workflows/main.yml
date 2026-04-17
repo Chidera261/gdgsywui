@@ -1,4 +1,4 @@
-name: VPS Emulator Eternal V4 (Strict Exclusion)
+name: VPS Emulator Eternal V4 (Path Fixed)
 
 on:
   workflow_dispatch:
@@ -14,7 +14,8 @@ jobs:
       IDRIVE_SECRET_KEY: "VLmiPgwEwYGijMrry8jGXV2R3Cw2uSr5inFJoZnR"
       IDRIVE_ENDPOINT: "https://j7a4.la.idrivee2-35.com"
       BUCKET_NAME: "storage"
-      PM2_HOME: /home/runner/.pm2
+      # CRITICAL: Path must match install.sh
+      PM2_HOME: "${{ github.workspace }}/.pm2_eternal"
     
     steps:
       - name: Checkout
@@ -27,16 +28,34 @@ jobs:
           ./install.sh
           echo "/usr/local/bin" >> $GITHUB_PATH
 
+      - name: Restore PM2 State
+        run: |
+          # The install.sh already set up the folder. Just ping and resurrect.
+          pm2 ping
+          
+          if [ -f $PM2_HOME/dump.pm2 ]; then
+            echo "🔄 Surgical Path Repair in $PM2_HOME/dump.pm2"
+            node -e "
+              const fs = require('fs');
+              const path = process.env.PM2_HOME + '/dump.pm2';
+              if (fs.existsSync(path)) {
+                let data = fs.readFileSync(path, 'utf8');
+                // Fixes paths from previous generation to current
+                data = data.replace(/\/home\/runner\/work\/[^/]+\/[^/]+/g, process.env.GITHUB_WORKSPACE);
+                fs.writeFileSync(path, data);
+                console.log('✅ Repair Done');
+              }
+            "
+            pm2 resurrect || echo "First run."
+          fi
+
       - name: Background Sync Loop
         run: |
           (
             while true; do
               sleep 180
-              # Save PM2 state to a file in the workspace
               pm2 save --force > /dev/null 2>&1
-              cp /home/runner/.pm2/dump.pm2 $GITHUB_WORKSPACE/.pm2_dump 2>/dev/null || true
-              
-              # Sync everything EXCEPT git and workflows
+              # Sync the whole workspace including the .pm2_eternal folder
               nice -n 19 rclone sync $GITHUB_WORKSPACE idrive:$BUCKET_NAME \
                 --exclude ".git/**" \
                 --exclude ".github/**" \
@@ -46,15 +65,10 @@ jobs:
 
       - name: Connectivity Info
         run: |
-          # Prevent SSH timeouts
-          mkdir -p ~/.ssh
-          echo "ServerAliveInterval 30" >> ~/.ssh/config
-          
           tmate -S /tmp/tmate.sock new-session -d
           tmate -S /tmp/tmate.sock wait tmate-ready
           echo "---------------------------------------------------"
           echo "SSH: $(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')"
-          echo "WEB: $(tmate -S /tmp/tmate.sock display -p '#{tmate_web}')"
           echo "---------------------------------------------------"
 
       - name: 5.5-Hour Flush & Handoff
@@ -63,12 +77,7 @@ jobs:
         run: |
           sleep 19800
           pm2 save --force
-          cp $PM2_HOME/dump.pm2 $GITHUB_WORKSPACE/.pm2_dump
-          
-          # Final sync with exclusions
-          rclone sync $GITHUB_WORKSPACE idrive:$BUCKET_NAME \
-            --exclude ".git/**" \
-            --exclude ".github/**"
+          rclone sync $GITHUB_WORKSPACE idrive:$BUCKET_NAME --exclude ".git/**" --exclude ".github/**"
           
           NEXT_GEN=$(( ${{ github.event.inputs.generation }} + 1 ))
           curl -L -X POST \
