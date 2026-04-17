@@ -1,4 +1,4 @@
-name: VPS Emulator Eternal V4 (Anti-Hang)
+name: VPS Emulator Eternal V4
 
 on:
   workflow_dispatch:
@@ -23,6 +23,7 @@ jobs:
 
       - name: Mount & Provision
         run: |
+          # Install PM2 globally and force it into the system path
           sudo npm install -g pm2
           chmod +x install.sh
           ./install.sh
@@ -30,8 +31,8 @@ jobs:
 
       - name: Restore PM2 State (Surgical Repair)
         run: |
-          # Start daemon in background and suppress the ASCII splash hang
-          npx pm2 ping > /dev/null 2>&1 &
+          # Start PM2 daemon silently in the background
+          pm2 ping > /dev/null 2>&1 &
           sleep 10
           
           if [ -f $PM2_HOME/dump.pm2 ]; then
@@ -48,12 +49,17 @@ jobs:
                 }
               } catch (e) { console.error('❌ Path repair failed:', e.message); }
             "
-            # Resurrect without holding the shell hostage
-            npx pm2 resurrect || echo "⚠️ Nothing to resurrect."
+            # Resurrect processes from the cloud
+            pm2 resurrect || echo "⚠️ Nothing to resurrect."
           fi
 
       - name: Connectivity Info
         run: |
+          # Install tmate if missing (Safety check)
+          if ! command -v tmate &> /dev/null; then
+            sudo apt-get update && sudo apt-get install -y tmate
+          fi
+
           tmate -S /tmp/tmate.sock new-session -d
           tmate -S /tmp/tmate.sock wait tmate-ready
           echo "---------------------------------------------------"
@@ -66,8 +72,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.MY_PAT }}
         run: |
+          # Wait 5.5 hours
           sleep 19800
-          npx pm2 save --force
+          
+          # Final save to the cloud bucket
+          pm2 save --force
           
           NEXT_GEN=$(( ${{ github.event.inputs.generation }} + 1 ))
           curl -L -X POST \
