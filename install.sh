@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "🚀 V4: Initializing SSD + Cloud Sync (Excluding node_modules)..."
+echo "🚀 V4: Initializing SSD + Cloud Sync (Stability Optimized)..."
 
 # 1. Install Tools
 sudo curl https://rclone.org/install.sh | sudo bash
@@ -29,7 +29,7 @@ EOF
 export PM2_HOME="$GITHUB_WORKSPACE/.pm2_eternal"
 mkdir -p "$PM2_HOME"
 
-# 6. Pull from iDrive (Excluding heavy/useless folders)
+# 6. Pull from iDrive
 echo "📥 Syncing from iDrive..."
 rclone copy idrive:$BUCKET_NAME $GITHUB_WORKSPACE \
     --exclude ".git/**" \
@@ -37,11 +37,15 @@ rclone copy idrive:$BUCKET_NAME $GITHUB_WORKSPACE \
     --exclude "**/node_modules/**" \
     --progress
 
-# 7. Install Dependencies (Since node_modules is excluded)
+# 7. BLOCKING: Install Dependencies
+# This ensures apps don't start with missing modules
 if [ -f "$GITHUB_WORKSPACE/invest/package.json" ]; then
-    echo "📦 Installing 'invest' dependencies..."
-    cd "$GITHUB_WORKSPACE/invest" && npm install && cd "$GITHUB_WORKSPACE"
+    echo "📦 Installing 'invest' dependencies (this may take a moment)..."
+    cd "$GITHUB_WORKSPACE/invest" && npm install --no-audit --no-fund && cd "$GITHUB_WORKSPACE"
 fi
+
+# Signal to the workflow that we are ready
+touch .deps_ready
 
 # 8. Persistent Shell Config
 if [ ! -f $GITHUB_WORKSPACE/.bashrc_addon ]; then
@@ -51,9 +55,9 @@ export PATH="\$PATH:/usr/local/bin"
 alias save='pm2 save --force'
 alias status='pm2 status'
 alias logs='pm2 logs'
-alias push='rclone sync $GITHUB_WORKSPACE idrive:\$BUCKET_NAME --exclude ".git/**" --exclude ".github/**" --exclude "**/node_modules/**" --progress'
+alias push='rclone sync $GITHUB_WORKSPACE idrive:\$BUCKET_NAME --exclude \".git/**\" --exclude \".github/**\" --exclude \"**/node_modules/**\" --progress'
 EOF
 fi
 
 cat $GITHUB_WORKSPACE/.bashrc_addon >> /home/runner/.bashrc
-echo "✅ Environment Ready."
+echo "✅ Environment Ready & Dependencies Installed."
