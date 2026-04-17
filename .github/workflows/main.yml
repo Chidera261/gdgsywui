@@ -30,6 +30,10 @@ jobs:
 
       - name: Restore PM2 State
         run: |
+          # 1. Wait for install.sh to finish node_modules
+          echo "⏳ Waiting for dependencies to be ready..."
+          while [ ! -f .deps_ready ]; do sleep 5; done
+          
           pm2 ping
           if [ -f $PM2_HOME/dump.pm2 ]; then
             echo "🔄 Surgical Path Repair..."
@@ -40,7 +44,11 @@ jobs:
               data = data.replace(/\/home\/runner\/work\/[^/]+\/[^/]+/g, process.env.GITHUB_WORKSPACE);
               fs.writeFileSync(path, data);
             "
-            pm2 resurrect || echo "First run."
+            # 2. Resurrect (Brings back names)
+            pm2 resurrect || echo "New start."
+            
+            # 3. Restart (Brings back functionality/memory/ports)
+            pm2 restart all --update-env
           fi
 
       - name: Background Sync Loop
@@ -74,17 +82,9 @@ jobs:
           GH_TOKEN: ${{ secrets.MY_PAT }}
         run: |
           sleep 19800
-          echo "🚨 Starting Handoff..."
           pm2 save --force
+          rclone sync $GITHUB_WORKSPACE idrive:$BUCKET_NAME --exclude ".git/**" --exclude ".github/**" --exclude "**/node_modules/**" --exclude "**/*.sock"
           
-          # Final Sync
-          rclone sync $GITHUB_WORKSPACE idrive:$BUCKET_NAME \
-            --exclude ".git/**" \
-            --exclude ".github/**" \
-            --exclude "**/node_modules/**" \
-            --exclude "**/*.sock"
-          
-          # Trigger Next Gen (Updated to main.yml)
           NEXT_GEN=$(( ${{ github.event.inputs.generation }} + 1 ))
           curl -L -X POST \
             -H "Authorization: token $GH_TOKEN" \
