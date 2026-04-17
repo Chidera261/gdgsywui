@@ -1,7 +1,7 @@
 #!/bin/bash
-echo "🚀 V5.2: Native Home Persistence (.bashrc & .pm2)"
+echo "🚀 V5.2.1: Native Home Persistence (Sync Priority)"
 
-# 1. Install Core Tools
+# 1. Core Tools
 sudo curl https://rclone.org/install.sh | sudo bash
 sudo apt-get update && sudo apt-get install -y jq micro htop ncdu btop tmate openssh-server
 
@@ -24,7 +24,7 @@ endpoint = $IDRIVE_ENDPOINT
 region = us-west-2
 EOF
 
-# 4. INITIAL PULL: Pull the entire home directory state
+# 4. CRITICAL: Pull Home state BEFORE anything else
 echo "📥 Syncing Home state from iDrive..."
 rclone copy idrive:$BUCKET_NAME /home/runner \
     --exclude "actions-runner/**" \
@@ -34,14 +34,17 @@ rclone copy idrive:$BUCKET_NAME /home/runner \
     --exclude ".cache/**" \
     --progress
 
+# Signal that files are on disk
+touch /home/runner/.files_ready
+
 # 5. Dependency Installation
 echo "📦 Refreshing project dependencies..."
 find /home/runner -name "package.json" -not -path "*/node_modules/*" -execdir npm install --no-audit --no-fund \;
 
+# Signal that dependencies are ready
 touch /home/runner/.deps_ready
 
 # 6. Native .bashrc Update
-# We use a marker to ensure we only append the aliases once
 if ! grep -q "ETERNAL_VPS_MARKER" /home/runner/.bashrc; then
     cat <<EOF >> /home/runner/.bashrc
 
@@ -52,5 +55,3 @@ alias status='pm2 status'
 # --- END_MARKER ---
 EOF
 fi
-
-echo "✅ Native Environment Ready."
