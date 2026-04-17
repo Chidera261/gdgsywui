@@ -1,4 +1,4 @@
-name: VPS Emulator Eternal V5.2.1
+name: VPS Emulator Eternal V5.2.2
 
 on:
   workflow_dispatch:
@@ -28,23 +28,23 @@ jobs:
 
       - name: Restore PM2 State
         run: |
-          # 1. Wait for Rclone to finish downloading the .pm2 folder
-          echo "⏳ Waiting for files from iDrive..."
+          # 1. Wait for Rclone and Install scripts to finish
+          echo "⏳ Waiting for environment synchronization..."
           while [ ! -f /home/runner/.files_ready ]; do sleep 2; done
-          
-          # 2. Wait for npm install to finish
-          echo "⏳ Waiting for dependencies..."
           while [ ! -f /home/runner/.deps_ready ]; do sleep 2; done
           
-          # 3. Now start PM2 and Resurrect
+          # 2. Initialize PM2 daemon
           pm2 ping
+          
+          # 3. Resurrect with Non-Blocking Logic
           if [ -f /home/runner/.pm2/dump.pm2 ]; then
-            echo "✅ dump.pm2 found. Resurrecting..."
-            pm2 resurrect || echo "Resurrect failed, starting fresh."
-            pm2 restart all --update-env
+            echo "✅ dump.pm2 found. Attempting resurrection..."
+            pm2 resurrect || echo "⚠️ PM2 found no processes to restore."
+            pm2 restart all --update-env || echo "No active processes to restart."
           else
-            echo "⚠️ No dump.pm2 found in /home/runner/.pm2/"
+            echo "ℹ️ No previous PM2 state found. Ready for first-time setup."
           fi
+          echo "🚀 PM2 initialization complete."
 
       - name: Background Sync Loop
         run: |
@@ -52,7 +52,7 @@ jobs:
             while true; do
               sleep 180
               pm2 save --force > /dev/null 2>&1
-              # Keep iDrive updated with the entire home dir
+              # Keep iDrive updated with everything in /home/runner
               nice -n 19 rclone sync /home/runner idrive:$BUCKET_NAME \
                 --exclude "actions-runner/**" \
                 --exclude ".github/**" \
@@ -68,6 +68,7 @@ jobs:
           GH_TOKEN: ${{ secrets.MY_PAT }}
         run: |
           sleep 19800
+          echo "🚨 Starting end-of-generation handoff..."
           pm2 save --force
           rclone sync /home/runner idrive:$BUCKET_NAME \
             --exclude "actions-runner/**" \
