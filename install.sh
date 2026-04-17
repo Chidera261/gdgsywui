@@ -17,45 +17,47 @@ endpoint = $IDRIVE_ENDPOINT
 region = us-west-2
 EOF
 
-# 3. Prepare the Mount Point
+# 3. Prepare Mount Point
 mkdir -p ~/home
 
-# 4. Mount iDrive (Background)
-# vfs-cache-mode writes is essential for PM2 database integrity
+# 4. Mount iDrive
 rclone mount idrive:$BUCKET_NAME ~/home \
     --vfs-cache-mode writes \
     --vfs-cache-max-size 10G \
     --daemon
 
-# Wait for mount to stabilize
-echo "⏳ Waiting for cloud mount..."
-sleep 8
+echo "⏳ Waiting for cloud mount to stabilize..."
+for i in {1..15}; do
+    if mountpoint -q ~/home; then
+        echo "✅ Mount detected!"
+        break
+    fi
+    sleep 1
+done
 
-# 5. Reconstruct System Environment
+# 5. Link PM2 state to the cloud drive
 mkdir -p ~/home/.pm2
-mkdir -p ~/home/bin
-mkdir -p ~/home/projects
-
-# Link PM2 state to the cloud drive
 rm -rf ~/.pm2
 ln -sf ~/home/.pm2 ~/.pm2
 
 # 6. Persistent Shell Config
-# We create a clean bridge between the system bashrc and your cloud bashrc
 if [ ! -f ~/home/.bashrc_addon ]; then
-    echo "export PM2_HOME=~/.pm2" > ~/home/.bashrc_addon
-    echo "alias save='pm2 save --force'" >> ~/home/.bashrc_addon
-    echo "alias status='pm2 status'" >> ~/home/.bashrc_addon
+    cat <<EOF > ~/home/.bashrc_addon
+export PM2_HOME=~/.pm2
+alias save='npx pm2 save --force'
+alias status='npx pm2 status'
+alias logs='npx pm2 logs'
+EOF
 fi
 
-# Apply the cloud aliases to the current session
+# Append cloud config to local session
 cat ~/home/.bashrc_addon >> ~/.bashrc
 
-# 7. Auto-install stored programs list (The Fixed Syntax)
+# 7. Auto-install apps
 if [ -f ~/home/apps.txt ]; then
-    echo "📦 Re-installing your custom apps..."
+    echo "📦 Re-installing custom apps..."
     APPS=$(cat ~/home/apps.txt)
     sudo apt-get install -y $APPS
 fi
 
-echo "✅ Eternal Home is live at ~/home"
+echo "✅ Environment Ready."
