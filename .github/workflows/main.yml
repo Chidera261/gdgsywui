@@ -1,9 +1,10 @@
-name: VPS Emulator Eternal V4 (Buffered Sync)
+name: VPS Emulator Eternal V4 (Hybrid Sync)
 
 on:
   workflow_dispatch:
     inputs:
       generation:
+        description: 'Generation'
         default: '1'
 
 jobs:
@@ -17,7 +18,7 @@ jobs:
       PM2_HOME: /home/runner/.pm2
     
     steps:
-      - name: Checkout Bootloader
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Provision & Pull
@@ -27,13 +28,12 @@ jobs:
           ./install.sh
           echo "/usr/local/bin" >> $GITHUB_PATH
 
-      - name: Restore PM2 State (Surgical)
+      - name: Restore PM2 State
         run: |
-          # Start daemon
           pm2 ping
-          
-          if [ -f $PM2_HOME/dump.pm2 ]; then
-            echo "🔄 Repairing paths..."
+          if [ -f $GITHUB_WORKSPACE/.pm2_dump ]; then
+            cp $GITHUB_WORKSPACE/.pm2_dump $PM2_HOME/dump.pm2
+            # Fix paths in the dump file
             node -e "
               const fs = require('fs');
               const path = process.env.PM2_HOME + '/dump.pm2';
@@ -43,7 +43,7 @@ jobs:
                 fs.writeFileSync(path, data);
               }
             "
-            pm2 resurrect || echo "New setup."
+            pm2 resurrect || echo "New state."
           fi
 
       - name: Background Sync Loop
@@ -52,8 +52,8 @@ jobs:
             while true; do
               sleep 180 # Sync every 3 mins
               pm2 save --force > /dev/null 2>&1
-              rclone sync /home/runner/home idrive:$BUCKET_NAME
-              echo "☁️ Snapshot synced to iDrive at $(date)"
+              cp $PM2_HOME/dump.pm2 $GITHUB_WORKSPACE/.pm2_dump 2>/dev/null || true
+              rclone sync $GITHUB_WORKSPACE idrive:$BUCKET_NAME
             done
           ) &
 
@@ -62,8 +62,8 @@ jobs:
           tmate -S /tmp/tmate.sock new-session -d
           tmate -S /tmp/tmate.sock wait tmate-ready
           echo "---------------------------------------------------"
+          echo "🚀 GENERATION: ${{ github.event.inputs.generation }}"
           echo "SSH: $(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')"
-          echo "WEB: $(tmate -S /tmp/tmate.sock display -p '#{tmate_web}')"
           echo "---------------------------------------------------"
 
       - name: 5.5-Hour Flush & Handoff
@@ -71,11 +71,9 @@ jobs:
           GH_TOKEN: ${{ secrets.MY_PAT }}
         run: |
           sleep 19800
-          echo "🚨 Finalizing Generation..."
-          
-          # Final persistence push
           pm2 save --force
-          rclone sync /home/runner/home idrive:$BUCKET_NAME
+          cp $PM2_HOME/dump.pm2 $GITHUB_WORKSPACE/.pm2_dump
+          rclone sync $GITHUB_WORKSPACE idrive:$BUCKET_NAME
           
           NEXT_GEN=$(( ${{ github.event.inputs.generation }} + 1 ))
           curl -L -X POST \
