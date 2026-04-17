@@ -1,4 +1,4 @@
-name: VPS Emulator Eternal V4 (Path Fixed)
+name: VPS Emulator Eternal V4 (Anti-Hang)
 
 on:
   workflow_dispatch:
@@ -26,14 +26,13 @@ jobs:
           sudo npm install -g pm2
           chmod +x install.sh
           ./install.sh
-          # Refresh path for the current runner session
           echo "/usr/local/bin" >> $GITHUB_PATH
 
-      - name: Restore PM2 State (Path-Aware)
+      - name: Restore PM2 State (Surgical Repair)
         run: |
-          # Using npx ensures we find the pm2 binary regardless of path caching
-          npx pm2 ping || npx pm2 startup
-          sleep 8
+          # Start daemon in background and suppress the ASCII splash hang
+          npx pm2 ping > /dev/null 2>&1 &
+          sleep 10
           
           if [ -f $PM2_HOME/dump.pm2 ]; then
             echo "🔄 Correcting paths for current VM..."
@@ -49,7 +48,8 @@ jobs:
                 }
               } catch (e) { console.error('❌ Path repair failed:', e.message); }
             "
-            npx pm2 resurrect || echo "⚠️ Resurrection failed."
+            # Resurrect without holding the shell hostage
+            npx pm2 resurrect || echo "⚠️ Nothing to resurrect."
           fi
 
       - name: Connectivity Info
