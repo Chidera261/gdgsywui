@@ -1,9 +1,10 @@
-name: VPS Emulator Eternal V4 (Path Fixed)
+name: VPS Emulator Eternal V4
 
 on:
   workflow_dispatch:
     inputs:
       generation:
+        description: 'Generation'
         default: '1'
 
 jobs:
@@ -14,7 +15,6 @@ jobs:
       IDRIVE_SECRET_KEY: "VLmiPgwEwYGijMrry8jGXV2R3Cw2uSr5inFJoZnR"
       IDRIVE_ENDPOINT: "https://j7a4.la.idrivee2-35.com"
       BUCKET_NAME: "storage"
-      # CRITICAL: Path must match install.sh
       PM2_HOME: "${{ github.workspace }}/.pm2_eternal"
     
     steps:
@@ -30,21 +30,15 @@ jobs:
 
       - name: Restore PM2 State
         run: |
-          # The install.sh already set up the folder. Just ping and resurrect.
           pm2 ping
-          
           if [ -f $PM2_HOME/dump.pm2 ]; then
-            echo "🔄 Surgical Path Repair in $PM2_HOME/dump.pm2"
+            echo "🔄 Surgical Path Repair..."
             node -e "
               const fs = require('fs');
               const path = process.env.PM2_HOME + '/dump.pm2';
-              if (fs.existsSync(path)) {
-                let data = fs.readFileSync(path, 'utf8');
-                // Fixes paths from previous generation to current
-                data = data.replace(/\/home\/runner\/work\/[^/]+\/[^/]+/g, process.env.GITHUB_WORKSPACE);
-                fs.writeFileSync(path, data);
-                console.log('✅ Repair Done');
-              }
+              let data = fs.readFileSync(path, 'utf8');
+              data = data.replace(/\/home\/runner\/work\/[^/]+\/[^/]+/g, process.env.GITHUB_WORKSPACE);
+              fs.writeFileSync(path, data);
             "
             pm2 resurrect || echo "First run."
           fi
@@ -55,19 +49,23 @@ jobs:
             while true; do
               sleep 180
               pm2 save --force > /dev/null 2>&1
-              # Sync the whole workspace including the .pm2_eternal folder
               nice -n 19 rclone sync $GITHUB_WORKSPACE idrive:$BUCKET_NAME \
                 --exclude ".git/**" \
                 --exclude ".github/**" \
+                --exclude "**/node_modules/**" \
+                --exclude "**/*.sock" \
                 --quiet
             done
           ) &
 
       - name: Connectivity Info
         run: |
+          mkdir -p ~/.ssh
+          echo "ServerAliveInterval 30" >> ~/.ssh/config
           tmate -S /tmp/tmate.sock new-session -d
           tmate -S /tmp/tmate.sock wait tmate-ready
           echo "---------------------------------------------------"
+          echo "🚀 GENERATION: ${{ github.event.inputs.generation }}"
           echo "SSH: $(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')"
           echo "---------------------------------------------------"
 
@@ -76,14 +74,21 @@ jobs:
           GH_TOKEN: ${{ secrets.MY_PAT }}
         run: |
           sleep 19800
+          echo "🚨 Starting Handoff..."
           pm2 save --force
-          rclone sync $GITHUB_WORKSPACE idrive:$BUCKET_NAME --exclude ".git/**" --exclude ".github/**"
           
+          # Final Sync
+          rclone sync $GITHUB_WORKSPACE idrive:$BUCKET_NAME \
+            --exclude ".git/**" \
+            --exclude ".github/**" \
+            --exclude "**/node_modules/**" \
+            --exclude "**/*.sock"
+          
+          # Trigger Next Gen (Updated to main.yml)
           NEXT_GEN=$(( ${{ github.event.inputs.generation }} + 1 ))
           curl -L -X POST \
             -H "Authorization: token $GH_TOKEN" \
             -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/repos/${{ github.repository }}/actions/workflows/vps-eternal-v4.yaml/dispatches \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/main.yml/dispatches \
             -d "{\"ref\":\"${{ github.ref_name }}\", \"inputs\": {\"generation\": \"$NEXT_GEN\"}}"
           sleep 600
-          
