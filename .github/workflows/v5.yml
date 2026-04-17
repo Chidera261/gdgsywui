@@ -1,4 +1,4 @@
-name: VPS Emulator Eternal V5 (Cloudflare Tunnel)
+name: VPS Emulator Eternal V5.2
 
 on:
   workflow_dispatch:
@@ -14,7 +14,6 @@ jobs:
       IDRIVE_SECRET_KEY: "VLmiPgwEwYGijMrry8jGXV2R3Cw2uSr5inFJoZnR"
       IDRIVE_ENDPOINT: "https://j7a4.la.idrivee2-35.com"
       BUCKET_NAME: "storage"
-      PM2_HOME: "${{ github.workspace }}/.pm2_eternal"
     
     steps:
       - name: Checkout
@@ -29,17 +28,10 @@ jobs:
 
       - name: Restore PM2 State
         run: |
-          while [ ! -f .deps_ready ]; do sleep 5; done
+          while [ ! -f /home/runner/.deps_ready ]; do sleep 5; done
           pm2 ping
-          if [ -f $PM2_HOME/dump.pm2 ]; then
-            node -e "
-              const fs = require('fs');
-              const path = process.env.PM2_HOME + '/dump.pm2';
-              let data = fs.readFileSync(path, 'utf8');
-              data = data.replace(/\/home\/runner\/work\/[^/]+\/[^/]+/g, process.env.GITHUB_WORKSPACE);
-              fs.writeFileSync(path, data);
-            "
-            pm2 resurrect || echo "New start."
+          if [ -f /home/runner/.pm2/dump.pm2 ]; then
+            pm2 resurrect || echo "Starting fresh."
             pm2 restart all --update-env
           fi
 
@@ -49,19 +41,16 @@ jobs:
             while true; do
               sleep 180
               pm2 save --force > /dev/null 2>&1
-              nice -n 19 rclone sync $GITHUB_WORKSPACE idrive:$BUCKET_NAME \
-                --exclude ".git/**" \
+              # Keep iDrive updated with the entire home dir
+              nice -n 19 rclone sync /home/runner idrive:$BUCKET_NAME \
+                --exclude "actions-runner/**" \
                 --exclude ".github/**" \
                 --exclude "**/node_modules/**" \
-                --exclude "**/*.sock" --quiet
+                --exclude ".pm2/*.sock" \
+                --exclude ".pm2/*.pid" \
+                --exclude ".cache/**" --quiet
             done
           ) &
-
-      - name: Backup Connectivity (Tmate)
-        run: |
-          tmate -S /tmp/tmate.sock new-session -d
-          tmate -S /tmp/tmate.sock wait tmate-ready
-          echo "CF Tunnel is primary. Backup SSH: $(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')"
 
       - name: 5.5-Hour Flush & Handoff
         env:
@@ -69,7 +58,12 @@ jobs:
         run: |
           sleep 19800
           pm2 save --force
-          rclone sync $GITHUB_WORKSPACE idrive:$BUCKET_NAME --exclude ".git/**" --exclude ".github/**" --exclude "**/node_modules/**"
+          rclone sync /home/runner idrive:$BUCKET_NAME \
+            --exclude "actions-runner/**" \
+            --exclude "**/node_modules/**" \
+            --exclude ".pm2/*.sock" \
+            --exclude ".pm2/*.pid" \
+            --exclude ".cache/**"
           
           NEXT_GEN=$(( ${{ github.event.inputs.generation }} + 1 ))
           curl -L -X POST \
@@ -78,3 +72,4 @@ jobs:
             https://api.github.com/repos/${{ github.repository }}/actions/workflows/main.yml/dispatches \
             -d "{\"ref\":\"${{ github.ref_name }}\", \"inputs\": {\"generation\": \"$NEXT_GEN\"}}"
           sleep 600
+          
