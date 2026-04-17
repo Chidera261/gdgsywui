@@ -1,10 +1,9 @@
-name: VPS Emulator Eternal V4
+name: VPS Emulator Eternal V4 (Buffered Sync)
 
 on:
   workflow_dispatch:
     inputs:
       generation:
-        description: 'Generation'
         default: '1'
 
 jobs:
@@ -21,62 +20,62 @@ jobs:
       - name: Checkout Bootloader
         uses: actions/checkout@v4
 
-      - name: Mount & Provision
+      - name: Provision & Pull
         run: |
-          # Install PM2 globally and force it into the system path
           sudo npm install -g pm2
           chmod +x install.sh
           ./install.sh
           echo "/usr/local/bin" >> $GITHUB_PATH
 
-      - name: Restore PM2 State (Surgical Repair)
+      - name: Restore PM2 State (Surgical)
         run: |
-          # Start PM2 daemon silently in the background
-          pm2 ping > /dev/null 2>&1 &
-          sleep 10
+          # Start daemon
+          pm2 ping
           
           if [ -f $PM2_HOME/dump.pm2 ]; then
-            echo "🔄 Correcting paths for current VM..."
+            echo "🔄 Repairing paths..."
             node -e "
               const fs = require('fs');
               const path = process.env.PM2_HOME + '/dump.pm2';
-              try {
-                if (fs.existsSync(path)) {
-                  const data = fs.readFileSync(path, 'utf8');
-                  const repaired = data.replace(/\/home\/runner\/work\/[^/]+\/[^/]+/g, process.env.GITHUB_WORKSPACE);
-                  fs.writeFileSync(path, repaired);
-                  console.log('✅ Path repair successful');
-                }
-              } catch (e) { console.error('❌ Path repair failed:', e.message); }
+              if (fs.existsSync(path)) {
+                let data = fs.readFileSync(path, 'utf8');
+                data = data.replace(/\/home\/runner\/work\/[^/]+\/[^/]+/g, process.env.GITHUB_WORKSPACE);
+                fs.writeFileSync(path, data);
+              }
             "
-            # Resurrect processes from the cloud
-            pm2 resurrect || echo "⚠️ Nothing to resurrect."
+            pm2 resurrect || echo "New setup."
           fi
+
+      - name: Background Sync Loop
+        run: |
+          (
+            while true; do
+              sleep 180 # Sync every 3 mins
+              pm2 save --force > /dev/null 2>&1
+              rclone sync /home/runner/home idrive:$BUCKET_NAME
+              echo "☁️ Snapshot synced to iDrive at $(date)"
+            done
+          ) &
 
       - name: Connectivity Info
         run: |
-          # Install tmate if missing (Safety check)
-          if ! command -v tmate &> /dev/null; then
-            sudo apt-get update && sudo apt-get install -y tmate
-          fi
-
           tmate -S /tmp/tmate.sock new-session -d
           tmate -S /tmp/tmate.sock wait tmate-ready
           echo "---------------------------------------------------"
-          echo "🚀 GENERATION: ${{ github.event.inputs.generation }}"
           echo "SSH: $(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')"
           echo "WEB: $(tmate -S /tmp/tmate.sock display -p '#{tmate_web}')"
           echo "---------------------------------------------------"
 
-      - name: The 5.5-Hour Hand-off
+      - name: 5.5-Hour Flush & Handoff
         env:
           GH_TOKEN: ${{ secrets.MY_PAT }}
         run: |
-          # Wait 5.5 hours
           sleep 19800
+          echo "🚨 Finalizing Generation..."
           
-          # Final save to the cloud bucket
+          # Final persistence push
           pm2 save --force
+          rclone sync /home/runner/home idrive:$BUCKET_NAME
           
           NEXT_GEN=$(( ${{ github.event.inputs.generation }} + 1 ))
           curl -L -X POST \
