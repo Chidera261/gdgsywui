@@ -1,7 +1,7 @@
 #!/bin/bash
 echo "🚀 V5.2.1: Native Home Persistence (Sync Priority)"
 
-# 1. Core Tools
+# 1. Install Core Tools
 sudo curl https://rclone.org/install.sh | sudo bash
 sudo apt-get update && sudo apt-get install -y jq micro htop ncdu btop tmate openssh-server
 
@@ -24,7 +24,7 @@ endpoint = $IDRIVE_ENDPOINT
 region = us-west-2
 EOF
 
-# 4. CRITICAL: Pull Home state BEFORE anything else
+# 4. INITIAL PULL: Pull the entire home directory state
 echo "📥 Syncing Home state from iDrive..."
 rclone copy idrive:$BUCKET_NAME /home/runner \
     --exclude "actions-runner/**" \
@@ -34,7 +34,7 @@ rclone copy idrive:$BUCKET_NAME /home/runner \
     --exclude ".cache/**" \
     --progress
 
-# Signal that files are on disk
+# Signal that files (including dump.pm2) are now on disk
 touch /home/runner/.files_ready
 
 # 5. Dependency Installation
@@ -44,7 +44,7 @@ find /home/runner -name "package.json" -not -path "*/node_modules/*" -execdir np
 # Signal that dependencies are ready
 touch /home/runner/.deps_ready
 
-# 6. Native .bashrc Update
+# 6. Native .bashrc Update (Aliases)
 if ! grep -q "ETERNAL_VPS_MARKER" /home/runner/.bashrc; then
     cat <<EOF >> /home/runner/.bashrc
 
@@ -55,3 +55,5 @@ alias status='pm2 status'
 # --- END_MARKER ---
 EOF
 fi
+
+echo "✅ Environment Ready."
