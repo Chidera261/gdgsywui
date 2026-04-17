@@ -1,0 +1,80 @@
+name: VPS Emulator Eternal V5 (Cloudflare Tunnel)
+
+on:
+  workflow_dispatch:
+    inputs:
+      generation:
+        default: '1'
+
+jobs:
+  vps-runtime:
+    runs-on: ubuntu-latest
+    env:
+      IDRIVE_ACCESS_KEY: "1wSsXXLgOy5R200QdufF"
+      IDRIVE_SECRET_KEY: "VLmiPgwEwYGijMrry8jGXV2R3Cw2uSr5inFJoZnR"
+      IDRIVE_ENDPOINT: "https://j7a4.la.idrivee2-35.com"
+      BUCKET_NAME: "storage"
+      PM2_HOME: "${{ github.workspace }}/.pm2_eternal"
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Provision & Pull
+        run: |
+          sudo npm install -g pm2
+          chmod +x install.sh
+          ./install.sh
+          echo "/usr/local/bin" >> $GITHUB_PATH
+
+      - name: Restore PM2 State
+        run: |
+          while [ ! -f .deps_ready ]; do sleep 5; done
+          pm2 ping
+          if [ -f $PM2_HOME/dump.pm2 ]; then
+            node -e "
+              const fs = require('fs');
+              const path = process.env.PM2_HOME + '/dump.pm2';
+              let data = fs.readFileSync(path, 'utf8');
+              data = data.replace(/\/home\/runner\/work\/[^/]+\/[^/]+/g, process.env.GITHUB_WORKSPACE);
+              fs.writeFileSync(path, data);
+            "
+            pm2 resurrect || echo "New start."
+            pm2 restart all --update-env
+          fi
+
+      - name: Background Sync Loop
+        run: |
+          (
+            while true; do
+              sleep 180
+              pm2 save --force > /dev/null 2>&1
+              nice -n 19 rclone sync $GITHUB_WORKSPACE idrive:$BUCKET_NAME \
+                --exclude ".git/**" \
+                --exclude ".github/**" \
+                --exclude "**/node_modules/**" \
+                --exclude "**/*.sock" --quiet
+            done
+          ) &
+
+      - name: Backup Connectivity (Tmate)
+        run: |
+          tmate -S /tmp/tmate.sock new-session -d
+          tmate -S /tmp/tmate.sock wait tmate-ready
+          echo "CF Tunnel is primary. Backup SSH: $(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')"
+
+      - name: 5.5-Hour Flush & Handoff
+        env:
+          GH_TOKEN: ${{ secrets.MY_PAT }}
+        run: |
+          sleep 19800
+          pm2 save --force
+          rclone sync $GITHUB_WORKSPACE idrive:$BUCKET_NAME --exclude ".git/**" --exclude ".github/**" --exclude "**/node_modules/**"
+          
+          NEXT_GEN=$(( ${{ github.event.inputs.generation }} + 1 ))
+          curl -L -X POST \
+            -H "Authorization: token $GH_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/main.yml/dispatches \
+            -d "{\"ref\":\"${{ github.ref_name }}\", \"inputs\": {\"generation\": \"$NEXT_GEN\"}}"
+          sleep 600
