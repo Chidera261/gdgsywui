@@ -1,18 +1,16 @@
 #!/bin/bash
-echo "🚀 V4: Installing Cloudflared, Opencode, and Syncing Environment..."
+echo "🚀 V4: Initializing SSD + Cloud Sync (Excluding node_modules)..."
 
-# 1. Install Standard Tools
+# 1. Install Tools
 sudo curl https://rclone.org/install.sh | sudo bash
 sudo apt-get update && sudo apt-get install -y jq micro htop ncdu btop tmate
 
-# 2. Install Cloudflared (Official Binary)
-echo "☁️ Installing Cloudflared..."
+# 2. Install Cloudflared (Official)
 curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
 sudo dpkg -i cloudflared.deb
 rm cloudflared.deb
 
-# 3. Install Custom Opencode Tool
-echo "🛠️ Installing Opencode..."
+# 3. Install Opencode
 curl -fsSL https://opencode.ai/install | bash
 
 # 4. Configure Rclone
@@ -31,30 +29,31 @@ EOF
 export PM2_HOME="$GITHUB_WORKSPACE/.pm2_eternal"
 mkdir -p "$PM2_HOME"
 
-# 6. Pull latest state from iDrive
-echo "📥 Pulling files from iDrive..."
+# 6. Pull from iDrive (Excluding heavy/useless folders)
+echo "📥 Syncing from iDrive..."
 rclone copy idrive:$BUCKET_NAME $GITHUB_WORKSPACE \
     --exclude ".git/**" \
     --exclude ".github/**" \
+    --exclude "**/node_modules/**" \
     --progress
 
-# 7. Persistent Shell Config
+# 7. Install Dependencies (Since node_modules is excluded)
+if [ -f "$GITHUB_WORKSPACE/invest/package.json" ]; then
+    echo "📦 Installing 'invest' dependencies..."
+    cd "$GITHUB_WORKSPACE/invest" && npm install && cd "$GITHUB_WORKSPACE"
+fi
+
+# 8. Persistent Shell Config
 if [ ! -f $GITHUB_WORKSPACE/.bashrc_addon ]; then
     cat <<EOF > $GITHUB_WORKSPACE/.bashrc_addon
-# Force PM2 to use the synced workspace folder
 export PM2_HOME="$GITHUB_WORKSPACE/.pm2_eternal"
 export PATH="\$PATH:/usr/local/bin"
-
-# Aliases
 alias save='pm2 save --force'
-alias push='rclone sync $GITHUB_WORKSPACE idrive:\$BUCKET_NAME --exclude ".git/**" --exclude ".github/**" --progress'
 alias status='pm2 status'
 alias logs='pm2 logs'
+alias push='rclone sync $GITHUB_WORKSPACE idrive:\$BUCKET_NAME --exclude ".git/**" --exclude ".github/**" --exclude "**/node_modules/**" --progress'
 EOF
 fi
 
-# Apply to current session
 cat $GITHUB_WORKSPACE/.bashrc_addon >> /home/runner/.bashrc
-source /home/runner/.bashrc
-
-echo "✅ Cloudflared, Opencode, and PM2 are now ready."
+echo "✅ Environment Ready."
