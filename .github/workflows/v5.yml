@@ -1,4 +1,4 @@
-name: VPS Emulator Eternal V5.2
+name: VPS Emulator Eternal V5.2.1
 
 on:
   workflow_dispatch:
@@ -28,11 +28,22 @@ jobs:
 
       - name: Restore PM2 State
         run: |
-          while [ ! -f /home/runner/.deps_ready ]; do sleep 5; done
+          # 1. Wait for Rclone to finish downloading the .pm2 folder
+          echo "⏳ Waiting for files from iDrive..."
+          while [ ! -f /home/runner/.files_ready ]; do sleep 2; done
+          
+          # 2. Wait for npm install to finish
+          echo "⏳ Waiting for dependencies..."
+          while [ ! -f /home/runner/.deps_ready ]; do sleep 2; done
+          
+          # 3. Now start PM2 and Resurrect
           pm2 ping
           if [ -f /home/runner/.pm2/dump.pm2 ]; then
-            pm2 resurrect || echo "Starting fresh."
+            echo "✅ dump.pm2 found. Resurrecting..."
+            pm2 resurrect || echo "Resurrect failed, starting fresh."
             pm2 restart all --update-env
+          else
+            echo "⚠️ No dump.pm2 found in /home/runner/.pm2/"
           fi
 
       - name: Background Sync Loop
