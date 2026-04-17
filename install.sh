@@ -1,25 +1,18 @@
 #!/bin/bash
-echo "🚀 V5: Eternal Cloudflare Tunnel Edition"
+echo "🚀 V5.2: Native Home Persistence (.bashrc & .pm2)"
 
-# 1. Install Standard Tools
+# 1. Install Core Tools
 sudo curl https://rclone.org/install.sh | sudo bash
 sudo apt-get update && sudo apt-get install -y jq micro htop ncdu btop tmate openssh-server
 
-# 2. Install Cloudflared (Official)
+# 2. Cloudflared & SSH Setup
 curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-sudo dpkg -i cloudflared.deb
-rm cloudflared.deb
-
-# 3. Setup SSH & User Security
+sudo dpkg -i cloudflared.deb && rm cloudflared.deb
 sudo service ssh start
-# Sets the 'runner' password to 'runner' - change this if you want more security
 echo "runner:runner" | sudo chpasswd
-
-# 4. Install Cloudflare Tunnel as a System Service
-# Using your provided token
 sudo cloudflared service install eyJhIjoiNDAwNmMxYTcwNmVhM2Y4NTFiMzViMWMyYTg1MDU5OGEiLCJ0IjoiMmRiZGY3MjctYzYxNC00ZTQ0LThiYTQtOTEzNGJhZjU4ZWI4IiwicyI6IlpURXpOakF3WkRNdE5ESXlZeTAwTURrMkxXSmpZamd0WkROaU5tWmxaakZqTnpBMyJ9
 
-# 5. Rclone & PM2 Setup (V4 logic)
+# 3. Rclone Configuration
 mkdir -p ~/.config/rclone
 cat <<EOF > ~/.config/rclone/rclone.conf
 [idrive]
@@ -31,33 +24,33 @@ endpoint = $IDRIVE_ENDPOINT
 region = us-west-2
 EOF
 
-export PM2_HOME="$GITHUB_WORKSPACE/.pm2_eternal"
-mkdir -p "$PM2_HOME"
-
-# 6. Pull Environment
-echo "📥 Syncing from iDrive..."
-rclone copy idrive:$BUCKET_NAME $GITHUB_WORKSPACE \
-    --exclude ".git/**" \
-    --exclude ".github/**" \
+# 4. INITIAL PULL: Pull the entire home directory state
+echo "📥 Syncing Home state from iDrive..."
+rclone copy idrive:$BUCKET_NAME /home/runner \
+    --exclude "actions-runner/**" \
     --exclude "**/node_modules/**" \
+    --exclude ".pm2/*.sock" \
+    --exclude ".pm2/*.pid" \
+    --exclude ".cache/**" \
     --progress
 
-# 7. Blocking Dependencies
-if [ -f "$GITHUB_WORKSPACE/invest/package.json" ]; then
-    echo "📦 Installing 'invest' dependencies..."
-    cd "$GITHUB_WORKSPACE/invest" && npm install --no-audit --no-fund && cd "$GITHUB_WORKSPACE"
-fi
+# 5. Dependency Installation
+echo "📦 Refreshing project dependencies..."
+find /home/runner -name "package.json" -not -path "*/node_modules/*" -execdir npm install --no-audit --no-fund \;
 
-touch .deps_ready
+touch /home/runner/.deps_ready
 
-# 8. Persistent Shell Config
-if [ ! -f $GITHUB_WORKSPACE/.bashrc_addon ]; then
-    cat <<EOF > $GITHUB_WORKSPACE/.bashrc_addon
-export PM2_HOME="$GITHUB_WORKSPACE/.pm2_eternal"
+# 6. Native .bashrc Update
+# We use a marker to ensure we only append the aliases once
+if ! grep -q "ETERNAL_VPS_MARKER" /home/runner/.bashrc; then
+    cat <<EOF >> /home/runner/.bashrc
+
+# --- ETERNAL_VPS_MARKER ---
 alias save='pm2 save --force'
-alias push='rclone sync \$GITHUB_WORKSPACE idrive:\$BUCKET_NAME --exclude \".git/**\" --exclude \".github/**\" --exclude \"**/node_modules/**\" --progress'
+alias push='rclone sync /home/runner idrive:\$BUCKET_NAME --exclude "actions-runner/**" --exclude "**/node_modules/**" --exclude ".pm2/*.sock" --exclude ".pm2/*.pid" --exclude ".cache/**" --progress'
+alias status='pm2 status'
+# --- END_MARKER ---
 EOF
 fi
 
-cat $GITHUB_WORKSPACE/.bashrc_addon >> /home/runner/.bashrc
-echo "✅ V5 Ready. Cloudflare Tunnel Active."
+echo "✅ Native Environment Ready."
