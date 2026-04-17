@@ -21,38 +21,41 @@ EOF
 mkdir -p ~/home
 
 # 4. Mount iDrive (Background)
-# --vfs-cache-mode writes allows PM2 to write its database/logs directly to the cloud
+# vfs-cache-mode writes is essential for PM2 database integrity
 rclone mount idrive:$BUCKET_NAME ~/home \
     --vfs-cache-mode writes \
     --vfs-cache-max-size 10G \
     --daemon
 
 # Wait for mount to stabilize
-sleep 5
+echo "⏳ Waiting for cloud mount..."
+sleep 8
 
 # 5. Reconstruct System Environment
-# Create core folders on iDrive if it's the very first run
 mkdir -p ~/home/.pm2
 mkdir -p ~/home/bin
 mkdir -p ~/home/projects
 
-# Link PM2 state to the cloud
+# Link PM2 state to the cloud drive
 rm -rf ~/.pm2
 ln -sf ~/home/.pm2 ~/.pm2
 
 # 6. Persistent Shell Config
-# We append a custom addon file from iDrive to the local .bashrc
-if [ -f ~/home/.bashrc_addon ]; then
-    cat ~/home/.bashrc_addon >> ~/.bashrc
-else
+# We create a clean bridge between the system bashrc and your cloud bashrc
+if [ ! -f ~/home/.bashrc_addon ]; then
     echo "export PM2_HOME=~/.pm2" > ~/home/.bashrc_addon
     echo "alias save='pm2 save --force'" >> ~/home/.bashrc_addon
     echo "alias status='pm2 status'" >> ~/home/.bashrc_addon
 fi
 
-# 7. Auto-install stored programs list
+# Apply the cloud aliases to the current session
+cat ~/home/.bashrc_addon >> ~/.bashrc
+
+# 7. Auto-install stored programs list (The Fixed Syntax)
 if [ -f ~/home/apps.txt ]; then
-    sudo apt-get install -y \$(cat ~/home/apps.txt)
+    echo "📦 Re-installing your custom apps..."
+    APPS=$(cat ~/home/apps.txt)
+    sudo apt-get install -y $APPS
 fi
 
 echo "✅ Eternal Home is live at ~/home"
