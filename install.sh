@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "🚀 V5.2.1: Native Home Persistence (Sync Priority)"
+echo "🚀 V5.2.2: Native Home Persistence (Stability Patch)"
 
 # 1. Install Core Tools
 sudo curl https://rclone.org/install.sh | sudo bash
@@ -34,7 +34,7 @@ rclone copy idrive:$BUCKET_NAME /home/runner \
     --exclude ".cache/**" \
     --progress
 
-# Signal that files (including dump.pm2) are now on disk
+# Signal that files are now on disk
 touch /home/runner/.files_ready
 
 # 5. Dependency Installation
@@ -44,7 +44,7 @@ find /home/runner -name "package.json" -not -path "*/node_modules/*" -execdir np
 # Signal that dependencies are ready
 touch /home/runner/.deps_ready
 
-# 6. Native .bashrc Update (Aliases)
+# 6. Native .bashrc Update (Persistence for your session)
 if ! grep -q "ETERNAL_VPS_MARKER" /home/runner/.bashrc; then
     cat <<EOF >> /home/runner/.bashrc
 
@@ -52,6 +52,7 @@ if ! grep -q "ETERNAL_VPS_MARKER" /home/runner/.bashrc; then
 alias save='pm2 save --force'
 alias push='rclone sync /home/runner idrive:\$BUCKET_NAME --exclude "actions-runner/**" --exclude "**/node_modules/**" --exclude ".pm2/*.sock" --exclude ".pm2/*.pid" --exclude ".cache/**" --progress'
 alias status='pm2 status'
+alias logs='pm2 logs'
 # --- END_MARKER ---
 EOF
 fi
