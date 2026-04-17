@@ -1,11 +1,11 @@
 #!/bin/bash
-echo "🚀 V4: Initializing Eternal Cloud Environment..."
+echo "🚀 V4: Initializing Local Environment with Cloud Sync..."
 
-# 1. Install Rclone & System Tools
+# 1. Install Rclone & Tools
 sudo curl https://rclone.org/install.sh | sudo bash
-sudo apt-get update && sudo apt-get install -y fuse3 jq micro htop ncdu btop tmate
+sudo apt-get update && sudo apt-get install -y jq micro htop ncdu btop tmate
 
-# 2. Configure rclone for iDrive e2
+# 2. Configure rclone
 mkdir -p ~/.config/rclone
 cat <<EOF > ~/.config/rclone/rclone.conf
 [idrive]
@@ -17,52 +17,35 @@ endpoint = $IDRIVE_ENDPOINT
 region = us-west-2
 EOF
 
-# 3. Prepare Mount Point
+# 3. Initial Pull from Cloud
+echo "📥 Pulling latest state from iDrive..."
 mkdir -p /home/runner/home
+# Copy everything from iDrive to the local ~/home folder
+rclone copy idrive:$BUCKET_NAME /home/runner/home --progress
 
-# 4. Mount iDrive with VFS caching for database/log support
-rclone mount idrive:$BUCKET_NAME /home/runner/home \
-    --vfs-cache-mode writes \
-    --vfs-cache-max-size 10G \
-    --dir-cache-time 2s \
-    --daemon-timeout 30s \
-    --daemon
-
-echo "⏳ Waiting for cloud mount to stabilize..."
-for i in {1..20}; do
-    if mountpoint -q /home/runner/home; then
-        echo "✅ Mount detected!"
-        break
-    fi
-    sleep 1
-done
-
-# 5. Link PM2 state to the cloud drive
-# Wipe local PM2 folder and force the link to the cloud
+# 4. Link PM2 to Local home
 rm -rf /home/runner/.pm2
 mkdir -p /home/runner/home/.pm2
 ln -s /home/runner/home/.pm2 /home/runner/.pm2
 
-# 6. Persistent Shell Config
-# This file lives on iDrive and is applied every boot
+# 5. Persistent Shell Config
 if [ ! -f /home/runner/home/.bashrc_addon ]; then
     cat <<EOF > /home/runner/home/.bashrc_addon
 export PM2_HOME=/home/runner/.pm2
 alias save='pm2 save --force'
 alias status='pm2 status'
 alias logs='pm2 logs'
-alias vs='code-server --auth none --port 8080'
+alias push='rclone sync /home/runner/home idrive:\$BUCKET_NAME --progress'
+cd /home/runner/home
 EOF
 fi
 
-# Apply the cloud configuration to the current session
+# Apply aliases
 cat /home/runner/home/.bashrc_addon >> /home/runner/.bashrc
 
-# 7. Auto-install additional apps list
+# 6. Auto-install apps
 if [ -f /home/runner/home/apps.txt ]; then
-    echo "📦 Re-installing custom apps..."
-    APPS=$(cat /home/runner/home/apps.txt)
-    sudo apt-get install -y $APPS
+    sudo apt-get install -y $(cat /home/runner/home/apps.txt)
 fi
 
-echo "✅ Environment Ready at ~/home"
+echo "✅ Environment ready. Working directory: ~/home"
