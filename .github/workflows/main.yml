@@ -1,21 +1,21 @@
-name: VPS Emulator Eternal V4
+name: guywteiwuyv5.2.5
 
 on:
   workflow_dispatch:
     inputs:
       generation:
-        description: 'Generation'
         default: '1'
+  repository_dispatch:
+    types: [trigger_vps]
 
 jobs:
   vps-runtime:
     runs-on: ubuntu-latest
     env:
-      IDRIVE_ACCESS_KEY: "1wSsXXLgOy5R200QdufF"
-      IDRIVE_SECRET_KEY: "VLmiPgwEwYGijMrry8jGXV2R3Cw2uSr5inFJoZnR"
-      IDRIVE_ENDPOINT: "https://j7a4.la.idrivee2-35.com"
+      IDRIVE_ACCESS_KEY: ${{ secrets.IDRIVE_ACCESS_KEY }}
+      IDRIVE_SECRET_KEY: ${{ secrets.IDRIVE_SECRET_KEY }}
+      IDRIVE_ENDPOINT: ${{ secrets.IDRIVE_ENDPOINT }}
       BUCKET_NAME: "storage"
-      PM2_HOME: "${{ github.workspace }}/.pm2_eternal"
     
     steps:
       - name: Checkout
@@ -30,25 +30,17 @@ jobs:
 
       - name: Restore PM2 State
         run: |
-          # 1. Wait for install.sh to finish node_modules
-          echo "⏳ Waiting for dependencies to be ready..."
-          while [ ! -f .deps_ready ]; do sleep 5; done
+          echo "⏳ Waiting for environment synchronization..."
+          while [ ! -f /home/runner/.files_ready ]; do sleep 2; done
+          while [ ! -f /home/runner/.deps_ready ]; do sleep 2; done
           
           pm2 ping
-          if [ -f $PM2_HOME/dump.pm2 ]; then
-            echo "🔄 Surgical Path Repair..."
-            node -e "
-              const fs = require('fs');
-              const path = process.env.PM2_HOME + '/dump.pm2';
-              let data = fs.readFileSync(path, 'utf8');
-              data = data.replace(/\/home\/runner\/work\/[^/]+\/[^/]+/g, process.env.GITHUB_WORKSPACE);
-              fs.writeFileSync(path, data);
-            "
-            # 2. Resurrect (Brings back names)
-            pm2 resurrect || echo "New start."
-            
-            # 3. Restart (Brings back functionality/memory/ports)
-            pm2 restart all --update-env
+          if [ -f /home/runner/.pm2/dump.pm2 ]; then
+            echo "✅ dump.pm2 found. Attempting resurrection..."
+            pm2 resurrect || echo "⚠️ No processes to restore."
+            pm2 restart all --update-env || echo "No active processes."
+          else
+            echo "ℹ️ No previous state found. Ready for setup."
           fi
 
       - name: Background Sync Loop
@@ -57,38 +49,45 @@ jobs:
             while true; do
               sleep 180
               pm2 save --force > /dev/null 2>&1
-              nice -n 19 rclone sync $GITHUB_WORKSPACE idrive:$BUCKET_NAME \
-                --exclude ".git/**" \
+              nice -n 19 rclone sync /home/runner idrive:$BUCKET_NAME \
+                --exclude "actions-runner/**" \
                 --exclude ".github/**" \
                 --exclude "**/node_modules/**" \
-                --exclude "**/*.sock" \
-                --quiet
+                --exclude ".pm2/*.sock" \
+                --exclude ".pm2/*.pid" \
+                --exclude ".cache/**" --quiet
             done
           ) &
 
-      - name: Connectivity Info
-        run: |
-          mkdir -p ~/.ssh
-          echo "ServerAliveInterval 30" >> ~/.ssh/config
-          tmate -S /tmp/tmate.sock new-session -d
-          tmate -S /tmp/tmate.sock wait tmate-ready
-          echo "---------------------------------------------------"
-          echo "🚀 GENERATION: ${{ github.event.inputs.generation }}"
-          echo "SSH: $(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')"
-          echo "---------------------------------------------------"
-
-      - name: 5.5-Hour Flush & Handoff
+      - name: 5.5-Hour Cross-Account Handoff
         env:
-          GH_TOKEN: ${{ secrets.MY_PAT }}
+          # N_GH_TOKEN = The PAT of the OTHER account
+          # REPO = The 'Username/Repo' of the OTHER account
+          REMOTE_TOKEN: ${{ secrets.N_GH_TOKEN }}
+          REMOTE_REPO: ${{ secrets.REPO }}
         run: |
-          sleep 19800
-          pm2 save --force
-          rclone sync $GITHUB_WORKSPACE idrive:$BUCKET_NAME --exclude ".git/**" --exclude ".github/**" --exclude "**/node_modules/**" --exclude "**/*.sock"
+          # Jitter sleep for stealth (approx 5.2 to 5.5 hours)
+          sleep $((19000 + RANDOM % 900))
           
-          NEXT_GEN=$(( ${{ github.event.inputs.generation }} + 1 ))
+          echo "🚨 Starting handoff to $REMOTE_REPO..."
+          pm2 save --force
+          rclone sync /home/runner idrive:$BUCKET_NAME \
+            --exclude "actions-runner/**" \
+            --exclude "**/node_modules/**" \
+            --exclude ".pm2/*.sock" \
+            --exclude ".pm2/*.pid" \
+            --exclude ".cache/**"
+          
+          # Logic to handle both manual and API triggers
+          CURRENT_GEN=${{ github.event.inputs.generation || github.event.client_payload.generation || 1 }}
+          NEXT_GEN=$(( CURRENT_GEN + 1 ))
+          
+          # The Dispatch Call
           curl -L -X POST \
-            -H "Authorization: token $GH_TOKEN" \
+            -H "Authorization: token $REMOTE_TOKEN" \
             -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/repos/${{ github.repository }}/actions/workflows/main.yml/dispatches \
-            -d "{\"ref\":\"${{ github.ref_name }}\", \"inputs\": {\"generation\": \"$NEXT_GEN\"}}"
+            https://api.github.com/repos/$REMOTE_REPO/dispatches \
+            -d "{\"event_type\": \"trigger_vps\", \"client_payload\": {\"generation\": \"$NEXT_GEN\"}}"
+          
+          echo "✅ Signal sent to next account. Generation $NEXT_GEN pending."
           sleep 600
