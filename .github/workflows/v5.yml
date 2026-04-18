@@ -81,7 +81,7 @@ jobs:
           curl -L -X POST \
             -H "Authorization: token $GH_TOKEN" \
             -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/repos/${{ github.repository }}/actions/workflows/main.yml/dispatches \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/v5.yml/dispatches \
             -d "{\"ref\":\"${{ github.ref_name }}\", \"inputs\": {\"generation\": \"$NEXT_GEN\"}}"
           sleep 600
           
