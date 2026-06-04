@@ -1,0 +1,48 @@
+name: WireGuard Test
+on: [workflow_dispatch]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install WireGuard
+        run: |
+          sudo apt update
+          sudo apt install -y wireguard
+
+      - name: Create Server Config
+        run: |
+          cd /tmp
+          umask 077
+          wg genkey | tee server.key | wg pubkey > server.pub
+          wg genkey | tee client.key | wg pubkey > client.pub
+          
+          cat > wg0.conf <<EOF
+          [Interface]
+          PrivateKey = $(cat server.key)
+          Address = 10.0.0.1/24
+          ListenPort = 51820
+          
+          [Peer]
+          PublicKey = $(cat client.pub)
+          AllowedIPs = 10.0.0.2/32
+          EOF
+          
+          sudo cp wg0.conf /etc/wireguard/
+
+      - name: Start WireGuard
+        run: |
+          sudo wg-quick up wg0
+          sudo wg show
+          
+          # Try to see if port is reachable (it won't be)
+          echo "GitHub Runner IP:"
+          curl -s ifconfig.me
+          
+          # Keep runner alive so you can test
+          sleep 300
+
+      - name: Check connectivity (from runner perspective)
+        run: |
+          echo "WireGuard is running, but GitHub's network blocks inbound UDP"
+          echo "Your phone cannot reach this runner from the internet"
